@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# ROS 2 / colcon workspace artifacts (build, install, log live one level up)
+build/
+install/
+log/
