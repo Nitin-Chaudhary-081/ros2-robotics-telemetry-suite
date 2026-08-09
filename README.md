@@ -79,8 +79,12 @@ module observes everything.
 | `/arm_joint_states` | `sensor_msgs/msg/JointState` | `pick_place_controller` | `telemetry_recorder` |
 | `/robot_description` | `std_msgs/msg/String` + global param | `robot_state_publisher` | Foxglove / rviz2 |
 | `/visualization/obstacles` | `visualization_msgs/msg/MarkerArray` | `obstacle_visualizer` | Foxglove (3D) |
+| `/simulation_status` | `std_msgs/msg/String` | `pybullet_sim` | `obstacle_avoider`, Foxglove |
 | `/arm_pose` | `geometry_msgs/msg/PoseStamped` | `pick_place_controller` | `telemetry_recorder` |
 | `/pick_place_status` | `std_msgs/msg/String` | `pick_place_controller` | `telemetry_recorder` |
+
+**Services:** `/reset_simulation`, `/pause_simulation`, `/resume_simulation`
+(`std_srvs/srv/Empty`, all served by `pybullet_sim`).
 
 **Frame tree:** `pybullet_sim` publishes only `odom → base_link` (motion). The
 URDF link transforms `base_link → {left_wheel, right_wheel, lidar_link,
@@ -214,6 +218,77 @@ cd ~/ros2_ws
 colcon test && colcon test-result          # full suite
 python3 -m pytest src/robot_telemetry/test -q
 python3 -m pytest src/basic_robot_sim/test -q
+```
+
+---
+
+## Simulation control & bounded behavior
+
+The simulation is **intentionally bounded** so it stays inside the obstacle
+course for repeatable visualization and testing. `pybullet_sim` owns the
+deterministic state machine `IDLE → RUNNING → COMPLETED` (with explicit
+RESET and PAUSE/RESUME commands); the avoider stops commanding once the sim
+leaves RUNNING. There is **no automatic periodic reset** — the robot only
+returns to the origin when you call the reset service.
+
+**State machine:** `IDLE` (started with `auto_drive:=false`) →
+`RUNNING` (automatic mode, default) → `COMPLETED` (max travel distance or
+safety boundary reached, robot stopped). `PAUSED` freezes physics; `RESET`
+returns to `(0, 0, 0)`.
+
+### Reset (no restart needed)
+
+```bash
+ros2 service call /reset_simulation std_srvs/srv/Empty "{}"
+# /odom immediately reports x=0, y=0; TF stays valid; no relaunch needed
+```
+
+### Pause / resume
+
+```bash
+ros2 service call /pause_simulation std_srvs/srv/Empty "{}"
+# pose frozen; /odom, /scan, /tf keep publishing stable values
+ros2 service call /resume_simulation std_srvs/srv/Empty "{}"
+```
+
+### Status
+
+```bash
+ros2 topic echo /simulation_status --once    # IDLE/RUNNING/PAUSED/COMPLETED
+```
+
+### Automatic mode (default)
+
+```bash
+ros2 launch basic_robot_sim obstacle_avoidance.launch.py
+# avoider avoids obstacles; robot stops at COMPLETED (max_travel_distance
+# from origin or outside the safety boundary)
+```
+
+### Manual control (`auto_drive:=false`)
+
+```bash
+# run the pieces individually, with the avoider in manual mode:
+python3 src/basic_robot_sim/scripts/pybullet_sim.py
+ros2 run basic_robot_sim obstacle_avoider --ros-args -p auto_drive:=false
+# the avoider publishes nothing; drive manually:
+ros2 topic pub /cmd_vel geometry_msgs/msg/Twist \
+    "{linear: {x: 0.3}, angular: {z: 0.0}}" -r 5
+# (Foxglove's publish panel can also send /cmd_vel)
+```
+
+### Tuning parameters (sim node, ROS 2 params)
+
+| Parameter | Default | Meaning |
+|-----------|---------|---------|
+| `max_travel_distance` | `12.0` | stop after this distance from the origin |
+| `max_x` / `min_x` | `15.0` / `-5.0` | safety boundary (course spans x=0..10) |
+| `max_y` / `min_y` | `8.0` / `-8.0` | safety boundary |
+| `auto_drive` | `true` | avoider generates commands (`false` = manual) |
+
+```bash
+python3 src/basic_robot_sim/scripts/pybullet_sim.py --ros-args \
+    -p max_travel_distance:=20.0
 ```
 
 ---
