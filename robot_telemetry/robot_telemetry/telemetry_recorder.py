@@ -8,7 +8,8 @@ structured CSV files (one per topic) plus a JSON-lines log:
         cmd_vel.csv           linear/angular velocities
         odom.csv              pose + velocities
         scan.csv              lidar summary (min/mean range)
-        joint_states.csv      arm joint angles + gripper
+        joint_states.csv      drive wheel joint angles (sim)
+        arm_joint_states.csv  arm joint angles + gripper
         arm_pose.csv          end-effector position
         pick_place_status.csv state machine status text
         telemetry.jsonl       every event as one JSON object per line
@@ -75,6 +76,9 @@ class TelemetryRecorder(Node):
              'min_range', 'mean_range'])
         self._csv['/joint_states'] = CsvLog(
             os.path.join(self.log_dir, 'joint_states.csv'),
+            ['sec', 'nanosec', 'left_wheel_joint', 'right_wheel_joint'])
+        self._csv['/arm_joint_states'] = CsvLog(
+            os.path.join(self.log_dir, 'arm_joint_states.csv'),
             ['sec', 'nanosec', 'waist', 'shoulder', 'elbow',
              'gripper_left', 'gripper_right'])
         self._csv['/arm_pose'] = CsvLog(
@@ -97,6 +101,8 @@ class TelemetryRecorder(Node):
                                  qos_profile=sensor_qos)
         self.create_subscription(JointState, '/joint_states',
                                  self._on_joint_states, 10)
+        self.create_subscription(JointState, '/arm_joint_states',
+                                 self._on_arm_joint_states, 10)
         self.create_subscription(PoseStamped, '/arm_pose',
                                  self._on_arm_pose, 10)
         self.create_subscription(String, '/pick_place_status',
@@ -155,8 +161,16 @@ class TelemetryRecorder(Node):
 
     def _on_joint_states(self, msg):
         s, ns = self._stamp(msg)
-        pos = list(msg.position) + [0.0] * 5
+        pos = list(msg.position) + [0.0] * 2
         self._record('/joint_states',
+                     [s, ns, pos[0], pos[1]],
+                     {'left_wheel_joint': pos[0],
+                      'right_wheel_joint': pos[1]})
+
+    def _on_arm_joint_states(self, msg):
+        s, ns = self._stamp(msg)
+        pos = list(msg.position) + [0.0] * 5
+        self._record('/arm_joint_states',
                      [s, ns, pos[0], pos[1], pos[2], pos[3], pos[4]],
                      {'waist': pos[0], 'shoulder': pos[1], 'elbow': pos[2],
                       'gripper_left': pos[3], 'gripper_right': pos[4]})

@@ -36,9 +36,11 @@ module observes everything.
 │  pybullet_sim node     │        │  pick_place_controller node  │
 │  (custom kinematics)   │        │  (3-DOF arm state machine)   │
 │                        │        │                              │
-│  pub  /odom            │        │  pub  /joint_states          │
+│  pub  /odom            │        │  pub  /arm_joint_states      │
 │  pub  /tf              │        │  pub  /arm_pose              │
 │  pub  /scan  (360°)    │        │  pub  /pick_place_status     │
+│  pub  /joint_states    │        │                              │
+│  pub  /robot_description│      │                              │
 │  sub  /cmd_vel         │        │                              │
 └─────────┬──────────────┘        └──────────────┬───────────────┘
           │                                      │
@@ -66,7 +68,9 @@ module observes everything.
 | `/odom` | `nav_msgs/msg/Odometry` | `pybullet_sim` | `telemetry_recorder` |
 | `/tf` | `tf2_msgs/msg/TFMessage` | `pybullet_sim` | any (via TF API) |
 | `/scan` | `sensor_msgs/msg/LaserScan` | `pybullet_sim` | `obstacle_avoider`, `telemetry_recorder` |
-| `/joint_states` | `sensor_msgs/msg/JointState` | `pick_place_controller` | `telemetry_recorder` |
+| `/joint_states` | `sensor_msgs/msg/JointState` | `pybullet_sim` (drive wheels) | `telemetry_recorder` |
+| `/arm_joint_states` | `sensor_msgs/msg/JointState` | `pick_place_controller` | `telemetry_recorder` |
+| `/robot_description` | `std_msgs/msg/String` + global param | `pybullet_sim` | Foxglove / rviz2 |
 | `/arm_pose` | `geometry_msgs/msg/PoseStamped` | `pick_place_controller` | `telemetry_recorder` |
 | `/pick_place_status` | `std_msgs/msg/String` | `pick_place_controller` | `telemetry_recorder` |
 

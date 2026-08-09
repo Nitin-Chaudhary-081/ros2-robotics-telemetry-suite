@@ -40,8 +40,10 @@ CSV_FIELDS = {
              'orient_w', 'lin_vel_x', 'ang_vel_z'],
     'scan': ['sec', 'nanosec', 'num_beams', 'range_min', 'range_max',
              'min_range', 'mean_range'],
-    'joint_states': ['sec', 'nanosec', 'waist', 'shoulder', 'elbow',
-                     'gripper_left', 'gripper_right'],
+    'joint_states': ['sec', 'nanosec', 'left_wheel_joint',
+                     'right_wheel_joint'],
+    'arm_joint_states': ['sec', 'nanosec', 'waist', 'shoulder', 'elbow',
+                         'gripper_left', 'gripper_right'],
     'arm_pose': ['sec', 'nanosec', 'x', 'y', 'z'],
     'pick_place_status': ['sec', 'nanosec', 'status'],
 }
@@ -148,6 +150,18 @@ def _arm_metrics(pose_rows, joint_rows):
     return m
 
 
+def _wheel_metrics(rows):
+    """Drive wheel joint travel (from sim /joint_states)."""
+    m = {'samples': len(rows),
+         'left_range_rad': 0.0, 'right_range_rad': 0.0}
+    if rows:
+        left = [r['left_wheel_joint'] for r in rows]
+        right = [r['right_wheel_joint'] for r in rows]
+        m['left_range_rad'] = round(max(left) - min(left), 3)
+        m['right_range_rad'] = round(max(right) - min(right), 3)
+    return m
+
+
 def _cycle_metrics(status_rows):
     """Pick-and-place state durations and cycle times."""
     m = {'cycles': 0, 'state_durations': {}, 'cycle_times_s': []}
@@ -204,9 +218,12 @@ def compute_metrics(data):
         metrics['motion'] = _motion_metrics(data['/odom'])
     if '/scan' in data:
         metrics['scan'] = _scan_metrics(data['/scan'])
-    if '/arm_pose' in data or '/joint_states' in data:
-        metrics['arm'] = _arm_metrics(data.get('/arm_pose', []),
-                                      data.get('/joint_states', []))
+    if '/arm_pose' in data or '/arm_joint_states' in data:
+        metrics['arm'] = _arm_metrics(
+            data.get('/arm_pose', []),
+            data.get('/arm_joint_states', data.get('/joint_states', [])))
+    if '/joint_states' in data:
+        metrics['wheel'] = _wheel_metrics(data['/joint_states'])
     if '/pick_place_status' in data:
         metrics['cycles'] = _cycle_metrics(data['/pick_place_status'])
     return metrics
@@ -257,7 +274,7 @@ def format_report(metrics, source_dir):
         add('  (no /scan data)')
     add('')
 
-    add('[ 4. Arm motion (from /arm_pose, /joint_states) ]')
+    add('[ 4. Arm motion (from /arm_pose, /arm_joint_states) ]')
     if 'arm' in metrics:
         ar = metrics['arm']
         add('  Max end-effector reach    : %.3f m' % ar['max_reach_m'])
@@ -271,6 +288,11 @@ def format_report(metrics, source_dir):
                 % ar['elbow_range_rad'])
     else:
         add('  (no arm data)')
+    if 'wheel' in metrics:
+        wh = metrics['wheel']
+        add('  Wheel joint travel (L/R)  : %.3f / %.3f rad'
+            % (wh['left_range_rad'], wh['right_range_rad']))
+        add('  Wheel samples             : %d' % wh['samples'])
     add('')
 
     add('[ 5. Pick-and-place cycles (from /pick_place_status) ]')

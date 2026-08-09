@@ -5,9 +5,9 @@ Simulates the full sequence: move to target, close gripper, lift,
 move to place location, release, and return home.
 
 Publishes:
-    /joint_states   sensor_msgs/msg/JointState   joint angles + gripper
-    /arm_pose       geometry_msgs/msg/PoseStamped  end-effector pose (frame "arm_tool")
-    /pick_place_status std_msgs/msg/String       human-readable status text
+    /arm_joint_states  sensor_msgs/msg/JointState   arm joint angles + gripper
+    /arm_pose          geometry_msgs/msg/PoseStamped  end-effector pose (frame "arm_tool")
+    /pick_place_status std_msgs/msg/String          human-readable status text
 
 Joint names: waist_joint, shoulder_joint, elbow_joint,
              gripper_left_joint, gripper_right_joint
@@ -61,7 +61,8 @@ class PickPlaceController(Node):
         super().__init__('pick_place_controller')
         self.arm = ThreeDOFArm()
 
-        self.joint_pub = self.create_publisher(JointState, '/joint_states', 10)
+        self.joint_pub = self.create_publisher(JointState,
+                                               '/arm_joint_states', 10)
         self.pose_pub = self.create_publisher(PoseStamped, '/arm_pose', 10)
         self.status_pub = self.create_publisher(String, '/pick_place_status', 10)
 
@@ -82,7 +83,7 @@ class PickPlaceController(Node):
 
         self.timer = self.create_timer(1.0 / self.RATE_HZ, self.control_loop)
         self.get_logger().info(
-            'pick_place_controller started: publishing /joint_states, '
+            'pick_place_controller started: publishing /arm_joint_states, '
             '/arm_pose, /pick_place_status')
         self._log('Initialising pick-and-place cycle')
 

@@ -5,15 +5,17 @@ Pure Python differential-drive robot simulation with ROS 2 interfaces.
 Provides:
     /cmd_vel      (subscriber) -- velocity commands
     /odom         (publisher)  -- odometry with covariance
-    /tf           (publisher)  -- odom -> base_link -> laser transforms
-    /scan         (publisher)  -- 360-beam LiDAR using ray-circle collision
+    /tf           (publisher)  -- odom -> base_link -> lidar_link/wheels/caster
+    /scan         (publisher)  -- 360-beam LiDAR, frame 'lidar_link'
     /joint_states (publisher)  -- wheel joint angles for visualization
+    /robot_description -- URDF model (topic + global parameter)
 
 Designed as a drop-in replacement for gz-sim (whose physics engines are
 unusable on this platform) and works with the obstacle_avoider node.
 """
 
 import math
+import os
 
 from geometry_msgs.msg import TransformStamped, Twist
 from nav_msgs.msg import Odometry
@@ -21,6 +23,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import JointState, LaserScan
+from std_msgs.msg import String
 from tf2_ros import TransformBroadcaster
 
 
@@ -75,7 +78,18 @@ class RobotSim(Node):
         self.odom_pub = self.create_publisher(Odometry, '/odom', qos)
         self.scan_pub = self.create_publisher(LaserScan, '/scan', qos)
         self.joint_pub = self.create_publisher(JointState, '/joint_states', qos)
+        self.robot_desc_pub = self.create_publisher(String,
+                                                    '/robot_description', qos)
         self.tf_broadcaster = TransformBroadcaster(self)
+
+        # Publish the robot model both as a topic and as a global parameter
+        # so Foxglove / rviz2 can load it automatically from the connection
+        urdf_xml = load_urdf()
+        self.robot_desc_pub.publish(String(data=urdf_xml))
+        self.declare_parameter('/robot_description', urdf_xml)
+        self.get_logger().info(
+            'robot_description published (%d chars) on topic + parameter'
+            % len(urdf_xml))
 
         # Timer for simulation step (100 Hz)
         self.dt = 0.01
@@ -160,14 +174,6 @@ class RobotSim(Node):
         t.transform.rotation.z = q[2]
         t.transform.rotation.w = q[3]
 
-        # Lidar transform: base_link -> laser (matches URDF lidar_joint origin)
-        lidar = TransformStamped()
-        lidar.header.stamp = now.to_msg()
-        lidar.header.frame_id = 'base_link'
-        lidar.child_frame_id = 'laser'
-        lidar.transform.translation.z = 0.07
-        lidar.transform.rotation.w = 1.0
-
         # Full URDF frame tree (base_link -> all links) so Foxglove renders
         # every link of robot.urdf, not just the chassis
         lidar_link = TransformStamped()
@@ -208,7 +214,7 @@ class RobotSim(Node):
         right_wheel.transform.rotation.z = qw[2]
         right_wheel.transform.rotation.w = qw[3]
 
-        self.tf_broadcaster.sendTransform([t, lidar, lidar_link, caster,
+        self.tf_broadcaster.sendTransform([t, lidar_link, caster,
                                            left_wheel, right_wheel])
 
     def py_angle_to_quaternion(self, angle):
@@ -218,7 +224,7 @@ class RobotSim(Node):
     def publish_scan(self, now):
         scan = LaserScan()
         scan.header.stamp = now.to_msg()
-        scan.header.frame_id = 'laser'
+        scan.header.frame_id = 'lidar_link'
         scan.angle_min = self.angle_min
         scan.angle_max = self.angle_max
         scan.angle_increment = self.angle_increment
@@ -275,6 +281,29 @@ class RobotSim(Node):
             cr * cp * cy + sr * sp * sy,
         ]
         return q
+
+
+def load_urdf():
+    """Return the robot.urdf XML as a string, from install or source tree."""
+    candidates = []
+
+    try:
+        from ament_index_python.packages import get_package_share_directory
+        candidates.append(os.path.join(
+            get_package_share_directory('basic_robot_sim'),
+            'urdf', 'robot.urdf'))
+    except Exception:
+        pass
+
+    candidates.append(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        '..', 'urdf', 'robot.urdf'))
+
+    for path in candidates:
+        if os.path.isfile(path):
+            with open(path) as fh:
+                return fh.read()
+    return ''
 
 
 def main():

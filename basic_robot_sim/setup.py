@@ -14,6 +14,8 @@ setup(
             ['launch/obstacle_avoidance.launch.py']),
         ('share/' + package_name + '/scripts',
             ['scripts/pybullet_sim.py']),
+        ('share/' + package_name + '/urdf',
+            ['urdf/robot.urdf']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
