@@ -21,7 +21,8 @@ from geometry_msgs.msg import TransformStamped, Twist
 from nav_msgs.msg import Odometry
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
+                       ReliabilityPolicy)
 from sensor_msgs.msg import JointState, LaserScan
 from std_msgs.msg import String
 from tf2_ros import TransformBroadcaster
@@ -78,18 +79,27 @@ class RobotSim(Node):
         self.odom_pub = self.create_publisher(Odometry, '/odom', qos)
         self.scan_pub = self.create_publisher(LaserScan, '/scan', qos)
         self.joint_pub = self.create_publisher(JointState, '/joint_states', qos)
-        self.robot_desc_pub = self.create_publisher(String,
-                                                    '/robot_description', qos)
+
+        # robot_description: transient-local durability (latched) so late
+        # subscribers still get the URDF, plus a republish timer as a fallback
+        robot_desc_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1)
+        self.robot_desc_pub = self.create_publisher(
+            String, '/robot_description', robot_desc_qos)
         self.tf_broadcaster = TransformBroadcaster(self)
 
         # Publish the robot model both as a topic and as a global parameter
         # so Foxglove / rviz2 can load it automatically from the connection
-        urdf_xml = load_urdf()
-        self.robot_desc_pub.publish(String(data=urdf_xml))
-        self.declare_parameter('/robot_description', urdf_xml)
+        self._urdf_xml = load_urdf()
+        self.publish_robot_description()
+        self.declare_parameter('/robot_description', self._urdf_xml)
+        self.create_timer(2.0, self.publish_robot_description)
         self.get_logger().info(
             'robot_description published (%d chars) on topic + parameter'
-            % len(urdf_xml))
+            % len(self._urdf_xml))
 
         # Timer for simulation step (100 Hz)
         self.dt = 0.01
@@ -103,6 +113,10 @@ class RobotSim(Node):
                             min(self.max_linear_vel, msg.linear.x))
         self.v_angular = max(-self.max_angular_vel,
                              min(self.max_angular_vel, msg.angular.z))
+
+    def publish_robot_description(self):
+        """(Re)publish the URDF; transient-local QoS latches it for joiners."""
+        self.robot_desc_pub.publish(String(data=self._urdf_xml))
 
     def step(self):
         now = self.get_clock().now()
