@@ -20,6 +20,7 @@ import math
 
 from geometry_msgs.msg import TransformStamped, Twist
 from nav_msgs.msg import Odometry
+from obstacle_world import get_obstacles
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
@@ -50,14 +51,9 @@ class RobotSim(Node):
         self.max_linear_vel = 1.0
         self.max_angular_vel = 2.0
 
-        # Obstacles (x, y, radius)
-        self.obstacles = [
-            (2.0, 0.0, 0.3),   # directly ahead at x=2
-            (4.0, 0.5, 0.4),
-            (6.0, -0.3, 0.3),
-            (8.0, 0.0, 0.4),   # directly ahead at x=8
-            (10.0, -0.5, 0.3),
-        ]
+        # Obstacles (x, y, radius) -- shared with obstacle_visualizer so the
+        # Foxglove markers match the LiDAR/collision world exactly
+        self.obstacles = get_obstacles()
 
         # Lidar params
         self.num_beams = 360

@@ -78,14 +78,16 @@ module observes everything.
 | `/joint_states` | `sensor_msgs/msg/JointState` | `pybullet_sim` (drive wheels) | `robot_state_publisher`, `telemetry_recorder` |
 | `/arm_joint_states` | `sensor_msgs/msg/JointState` | `pick_place_controller` | `telemetry_recorder` |
 | `/robot_description` | `std_msgs/msg/String` + global param | `robot_state_publisher` | Foxglove / rviz2 |
+| `/visualization/obstacles` | `visualization_msgs/msg/MarkerArray` | `obstacle_visualizer` | Foxglove (3D) |
+| `/arm_pose` | `geometry_msgs/msg/PoseStamped` | `pick_place_controller` | `telemetry_recorder` |
+| `/pick_place_status` | `std_msgs/msg/String` | `pick_place_controller` | `telemetry_recorder` |
 
 **Frame tree:** `pybullet_sim` publishes only `odom → base_link` (motion). The
 URDF link transforms `base_link → {left_wheel, right_wheel, lidar_link,
 caster_link}` are computed by **robot_state_publisher** from `/joint_states`
 (so wheel rotation animates in Foxglove), and the `lidar_link` frame carries
-`/scan`.
-| `/arm_pose` | `geometry_msgs/msg/PoseStamped` | `pick_place_controller` | `telemetry_recorder` |
-| `/pick_place_status` | `std_msgs/msg/String` | `pick_place_controller` | `telemetry_recorder` |
+`/scan`. Obstacle markers are published directly in the fixed frame `odom`
+(no extra TF frame).
 
 **Closed loop:** `obstacle_avoider` reads `/scan` → publishes `/cmd_vel` →
 `pybullet_sim` integrates differential-drive kinematics → publishes `/odom`,
@@ -153,14 +155,16 @@ colcon build --packages-select arm_pick_place
 colcon build --packages-select robot_telemetry
 ```
 
-### 4.3 Run — Obstacle Avoidance (sim + avoider + robot_state_publisher)
+### 4.3 Run — Obstacle Avoidance (sim + avoider + robot_state_publisher + visualizer)
 
 ```bash
-# single launch: pybullet_sim + obstacle_avoider + robot_state_publisher
+# single launch: pybullet_sim + obstacle_visualizer + obstacle_avoider
+#                + robot_state_publisher
 ros2 launch basic_robot_sim obstacle_avoidance.launch.py
 
 # or run the pieces individually in separate terminals:
 python3 src/basic_robot_sim/scripts/pybullet_sim.py
+python3 src/basic_robot_sim/scripts/obstacle_visualizer.py
 ros2 run basic_robot_sim obstacle_avoider
 ros2 run robot_state_publisher robot_state_publisher --ros-args \
     -p robot_description:="$(cat install/basic_robot_sim/share/basic_robot_sim/urdf/robot.urdf)"
@@ -214,6 +218,45 @@ python3 -m pytest src/basic_robot_sim/test -q
 
 ---
 
+## Foxglove obstacle visualization
+
+The simulated obstacles are published as 3D cylinders so they appear in
+Foxglove at exactly the positions the LiDAR detects.
+
+**Topic:** `/visualization/obstacles` (`visualization_msgs/msg/MarkerArray`)
+
+**How it works:** `obstacle_visualizer` reads the obstacle definitions from
+the shared module `basic_robot_sim/scripts/obstacle_world.py` — the **same
+source of truth** used by `pybullet_sim` for its LiDAR/collision logic. There
+is no second copy of the obstacle coordinates and no reconstruction from
+`/scan`; every marker is a `Marker.CYLINDER` in frame `odom` with
+`scale = (2r, 2r, 0.5 m)`, `ns = simulated_obstacles`, stable IDs, and
+`ADD` action. The node publishes continuously at 10 Hz with
+transient-local durability, so Foxglove receives the markers immediately
+even if it connects after the launch.
+
+**How to enable in Foxglove (3D panel):** connect to
+`ws://<AWS_IP>:8765`, set **Fixed frame = `odom`** (Display frame
+`base_link` follows the robot), then enable **TF**, **URDF**
+(`/robot_description`), `/scan` and `/visualization/obstacles`. The
+shipped `foxglove_layout.json` already includes the topic.
+
+**Expected result:** five upright orange cylinders (one per simulator
+obstacle) that stay fixed in the world while the robot drives around them,
+and the `/scan` points hug those same cylinders.
+
+**Troubleshooting:**
+
+```bash
+ros2 topic list | grep visualization          # topic exists?
+ros2 topic info /visualization/obstacles      # publisher = obstacle_visualizer
+ros2 topic echo /visualization/obstacles --once   # 5 markers, frame odom
+ros2 topic hz /visualization/obstacles        # ~10 Hz
+ros2 node list | grep obstacle_visualizer     # node running?
+```
+
+---
+
 ## 5. Verification & Unit Test Results
 
 | Suite | Result |
@@ -240,10 +283,12 @@ src/
 │   │   ├── obstacle_avoider.py     # LiDAR-driven avoidance control
 │   │   └── robot_mover.py          # simple cmd_vel publisher (dev helper)
 │   ├── launch/obstacle_avoidance.launch.py
-│   ├── scripts/pybullet_sim.py     # custom kinematics + LiDAR simulator
-│   ├── urdf/robot.urdf             # diff-drive + LiDAR model (Gazebo-ready)
-│   ├── worlds/obstacle_world.sdf   # Gazebo world (physics broken upstream)
-│   └── test/                       # ament style tests
+│   ├── scripts/pybullet_sim.py       # custom kinematics + LiDAR simulator
+│   ├── scripts/obstacle_world.py     # shared obstacle definitions (single source of truth)
+│   ├── scripts/obstacle_visualizer.py# Foxglove cylinder markers for obstacles
+│   ├── urdf/robot.urdf               # diff-drive + LiDAR model (Gazebo-ready)
+│   ├── worlds/obstacle_world.sdf     # Gazebo world (physics broken upstream)
+│   └── test/                         # ament style tests + marker conversion tests
 ├── arm_pick_place/
 │   ├── package.xml  setup.py  setup.cfg
 │   ├── arm_pick_place/
