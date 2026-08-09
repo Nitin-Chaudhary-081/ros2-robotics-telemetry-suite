@@ -9,7 +9,11 @@ import json
 
 
 class CsvLog:
-    """Append-only CSV file; header row written once on open."""
+    """Append-only CSV file; header row written once on open.
+
+    Writes are buffered: callers batch rows and call flush() (or close())
+    to persist them, so the hot ROS path never pays per-row I/O syscalls.
+    """
 
     def __init__(self, path, header):
         self.path = path
@@ -17,12 +21,13 @@ class CsvLog:
         self._file = open(path, 'w', newline='')
         self._writer = csv.writer(self._file)
         self._writer.writerow(list(header))
-        self._file.flush()
 
     def write(self, row):
         self._writer.writerow(list(row))
-        self._file.flush()
         self.count += 1
+
+    def flush(self):
+        self._file.flush()
 
     def close(self):
         self._file.close()
@@ -38,8 +43,10 @@ class JsonlLog:
 
     def write(self, event):
         self._file.write(json.dumps(event) + '\n')
-        self._file.flush()
         self.count += 1
+
+    def flush(self):
+        self._file.flush()
 
     def close(self):
         self._file.close()

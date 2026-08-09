@@ -96,6 +96,16 @@ class RobotSim(Node):
         self.angle_max = math.pi
         self.angle_increment = (self.angle_max - self.angle_min) / self.num_beams
 
+        # Precomputed per-beam ray directions (static part of the angle):
+        # the LiDAR algorithm is unchanged, we just avoid recomputing
+        # cos/sin for every beam on every 100 Hz tick.
+        self.beam_cos = [math.cos(self.angle_min + i * self.angle_increment)
+                         for i in range(self.num_beams)]
+        self.beam_sin = [math.sin(self.angle_min + i * self.angle_increment)
+                         for i in range(self.num_beams)]
+        # Reused per tick to avoid reallocating a 360-element list
+        self._scan_buffer = [0.0] * self.num_beams
+
         # ROS 2 interfaces
         qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
@@ -169,8 +179,9 @@ class RobotSim(Node):
         self.left_wheel_angle = 0.0
         self.right_wheel_angle = 0.0
         now = self.get_clock().now()
-        self.publish_odom(now, 0.0)
-        self.publish_tf(now)
+        q = self.euler_to_quaternion(0, 0, 0.0)
+        self.publish_odom(now, 0.0, q)
+        self.publish_tf(now, q)
         self.publish_joint_states(now)
         if was_paused:
             self.set_state(self.STATE_PAUSED)
@@ -236,8 +247,9 @@ class RobotSim(Node):
         if self.state != self.STATE_RUNNING:
             # Paused/completed/idle: no integration, but keep the world
             # stream fresh (Foxglove stays connected and pose is stable)
-            self.publish_odom(now, dt)
-            self.publish_tf(now)
+            q = self.euler_to_quaternion(0, 0, self.theta)
+            self.publish_odom(now, dt, q)
+            self.publish_tf(now, q)
             self.publish_scan(now)
             self.publish_joint_states(now)
             return
@@ -257,12 +269,13 @@ class RobotSim(Node):
         self.right_wheel_angle += v_right / self.wheel_radius * dt
 
         # Publish odom
-        self.publish_odom(now, dt)
-        self.publish_tf(now)
+        q = self.euler_to_quaternion(0, 0, self.theta)
+        self.publish_odom(now, dt, q)
+        self.publish_tf(now, q)
         self.publish_scan(now)
         self.publish_joint_states(now)
 
-    def publish_odom(self, now, dt):
+    def publish_odom(self, now, dt, q=None):
         odom = Odometry()
         odom.header.stamp = now.to_msg()
         odom.header.frame_id = 'odom'
@@ -272,7 +285,8 @@ class RobotSim(Node):
         odom.pose.pose.position.y = self.y
         odom.pose.pose.position.z = 0.0
 
-        q = self.euler_to_quaternion(0, 0, self.theta)
+        if q is None:
+            q = self.euler_to_quaternion(0, 0, self.theta)
         odom.pose.pose.orientation.x = q[0]
         odom.pose.pose.orientation.y = q[1]
         odom.pose.pose.orientation.z = q[2]
@@ -290,7 +304,7 @@ class RobotSim(Node):
 
         self.odom_pub.publish(odom)
 
-    def publish_tf(self, now):
+    def publish_tf(self, now, q=None):
         # Simulated motion only: odom -> base_link. The URDF link transforms
         # (left/right_wheel, lidar_link, caster_link) are published by
         # robot_state_publisher from the URDF joints + /joint_states.
@@ -301,7 +315,8 @@ class RobotSim(Node):
         t.transform.translation.x = self.x
         t.transform.translation.y = self.y
         t.transform.translation.z = 0.0
-        q = self.euler_to_quaternion(0, 0, self.theta)
+        if q is None:
+            q = self.euler_to_quaternion(0, 0, self.theta)
         t.transform.rotation.x = q[0]
         t.transform.rotation.y = q[1]
         t.transform.rotation.z = q[2]
@@ -320,19 +335,23 @@ class RobotSim(Node):
         scan.range_min = 0.1
         scan.range_max = self.max_range
 
-        ranges = []
+        cos_t = math.cos(self.theta)
+        sin_t = math.sin(self.theta)
+        # Hoist per-tick obstacle offsets out of the beam loop
+        obstacles = [(ox - self.x, oy - self.y, orad)
+                     for ox, oy, orad in self.obstacles]
+
+        ranges = self._scan_buffer
         for i in range(self.num_beams):
-            angle = self.angle_min + i * self.angle_increment
-            beam_angle = self.theta + angle
-            ray_x = math.cos(beam_angle)
-            ray_y = math.sin(beam_angle)
+            # Ray direction: cos(theta + beam_angle) / sin(theta + beam_angle)
+            # via the sum identities on the precomputed beam tables
+            ray_x = cos_t * self.beam_cos[i] - sin_t * self.beam_sin[i]
+            ray_y = sin_t * self.beam_cos[i] + cos_t * self.beam_sin[i]
 
             min_dist = self.max_range
 
             # Ray-circle collision: check obstacles from robot position
-            for ox, oy, orad in self.obstacles:
-                dx = ox - self.x
-                dy = oy - self.y
+            for dx, dy, orad in obstacles:
                 proj = dx * ray_x + dy * ray_y
                 if proj > 0.1:
                     perp_dist_sq = dx * dx + dy * dy - proj * proj
@@ -342,7 +361,7 @@ class RobotSim(Node):
                         if dist < min_dist:
                             min_dist = max(0.1, dist)
 
-            ranges.append(min_dist)
+            ranges[i] = min_dist
 
         scan.ranges = ranges
         self.scan_pub.publish(scan)

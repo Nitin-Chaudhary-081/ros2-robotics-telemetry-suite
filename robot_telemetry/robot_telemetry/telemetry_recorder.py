@@ -21,6 +21,7 @@ Run:
 
 import math
 import os
+import queue
 import threading
 from datetime import datetime
 
@@ -37,9 +38,15 @@ DEFAULT_BASE = os.path.join(os.path.expanduser('~'), 'telemetry_logs')
 
 
 class TelemetryRecorder(Node):
-    """Logs subscribed topics to CSV + JSONL under <log_dir>/<run_id>/."""
+    """Logs subscribed topics to CSV + JSONL under <log_dir>/<run_id>/.
+
+    ROS callbacks only enqueue rows; a background writer thread drains the
+    queue and flushes files in batches, so file I/O never blocks the spin
+    thread (or the 100 Hz simulation publishers that feed it).
+    """
 
     STATUS_PERIOD_S = 5.0
+    BATCH_PERIOD_S = 0.25
 
     def __init__(self):
         super().__init__('telemetry_recorder')
@@ -50,13 +57,18 @@ class TelemetryRecorder(Node):
         self.log_dir = os.path.join(base, run_id)
         os.makedirs(self.log_dir, exist_ok=True)
 
-        self._lock = threading.Lock()
+        self._queue = queue.Queue()
+        self._stop = threading.Event()
         self._csv = {}
         self._jsonl = JsonlLog(os.path.join(self.log_dir, 'telemetry.jsonl'))
         self._counts = {}
 
         self._open_topic_logs()
         self._create_subscribers()
+        self._writer = threading.Thread(target=self._write_worker,
+                                        name='telemetry-writer',
+                                        daemon=True)
+        self._writer.start()
         self.create_timer(self.STATUS_PERIOD_S, self._status_timer)
         self.get_logger().info(
             'telemetry_recorder started: logging to %s' % self.log_dir)
@@ -118,12 +130,34 @@ class TelemetryRecorder(Node):
         return now.sec, now.nanosec
 
     def _record(self, topic, row, data):
-        with self._lock:
-            self._csv[topic].write(row)
-            self._jsonl.write({'topic': topic,
-                               'sec': row[0], 'nanosec': row[1],
-                               'data': data})
-            self._counts[topic] = self._counts.get(topic, 0) + 1
+        self._queue.put((topic, row, data))
+
+    def _write_worker(self):
+        """Background thread: drain the queue, write rows in batches."""
+        while not self._stop.is_set():
+            try:
+                item = self._queue.get(timeout=self.BATCH_PERIOD_S)
+            except queue.Empty:
+                self._flush_all()
+                continue
+            batch = [item]
+            while True:
+                try:
+                    batch.append(self._queue.get_nowait())
+                except queue.Empty:
+                    break
+            for topic, row, data in batch:
+                self._csv[topic].write(row)
+                self._jsonl.write({'topic': topic,
+                                   'sec': row[0], 'nanosec': row[1],
+                                   'data': data})
+                self._counts[topic] = self._counts.get(topic, 0) + 1
+            self._flush_all()
+
+    def _flush_all(self):
+        for csv_log in self._csv.values():
+            csv_log.flush()
+        self._jsonl.flush()
 
     # ------------------------------------------------------------------
     def _on_cmd_vel(self, msg):
@@ -195,10 +229,22 @@ class TelemetryRecorder(Node):
                               for t in sorted(self._counts)), self.log_dir))
 
     def shutdown(self):
-        with self._lock:
-            for csv_log in self._csv.values():
-                csv_log.close()
-            self._jsonl.close()
+        # Drain the queue, then close the files
+        self._stop.set()
+        if self._writer is not None and self._writer.is_alive():
+            self._writer.join(timeout=5.0)
+        if not self._queue.empty():
+            batch = []
+            while not self._queue.empty():
+                batch.append(self._queue.get_nowait())
+            for topic, row, data in batch:
+                self._csv[topic].write(row)
+                self._jsonl.write({'topic': topic,
+                                   'sec': row[0], 'nanosec': row[1],
+                                   'data': data})
+        for csv_log in self._csv.values():
+            csv_log.close()
+        self._jsonl.close()
         self.get_logger().info('telemetry_recorder stopped: files in %s'
                                % self.log_dir)
 
