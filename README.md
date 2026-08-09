@@ -37,27 +37,34 @@ module observes everything.
 │  (custom kinematics)   │        │  (3-DOF arm state machine)   │
 │                        │        │                              │
 │  pub  /odom            │        │  pub  /arm_joint_states      │
-│  pub  /tf              │        │  pub  /arm_pose              │
+│  pub  /tf (odom→base)  │        │  pub  /arm_pose  (base_link) │
 │  pub  /scan  (360°)    │        │  pub  /pick_place_status     │
 │  pub  /joint_states    │        │                              │
-│  pub  /robot_description│      │                              │
 │  sub  /cmd_vel         │        │                              │
 └─────────┬──────────────┘        └──────────────┬───────────────┘
           │                                      │
           ▼                                      ▼
-┌──────────────────────┐        ┌──────────────────────────────┐
-│  obstacle_avoider    │        │  telemetry_recorder node     │
-│                      │        │  (subscribes to ALL topics)  │
-│  sub  /scan          │        │                              │
-│  pub  /cmd_vel       │        │  logs → CSV + JSONL files    │
-└─────────┬────────────┘        └──────────────┬───────────────┘
-          │                                      │
-          └──────────────┬───────────────────────┘
-                         ▼
+┌──────────────────────────────┐  ┌──────────────────────────────┐
+│  robot_state_publisher node  │  │  obstacle_avoider            │
+│  (URDF link transforms from  │  │                              │
+│   /joint_states)             │  │  sub  /scan                  │
+│                              │  │  pub  /cmd_vel               │
+│  pub  /robot_description     │  └──────────────┬───────────────┘
+│  pub  /tf (base→wheels/lidar)│                 │
+└──────────────┬───────────────┘                 │
+               │                                 │
+               └──────────────┬──────────────────┘
+                              ▼
         ┌─────────────────────────────────────┐
-        │  ros2 bag record (MCAP)             │
-        │  offline: analyze_telemetry        │
-        └─────────────────────────────────────┘
+        │  telemetry_recorder node           │
+        │  (subscribes to ALL topics)        │
+        │  logs → CSV + JSONL files          │
+        └────────────────────────────────────┘
+                              ▼
+         ┌─────────────────────────────────────┐
+         │  ros2 bag record (MCAP)             │
+         │  offline: analyze_telemetry        │
+         └─────────────────────────────────────┘
 ```
 
 ### Topics
@@ -66,11 +73,17 @@ module observes everything.
 |-------|------|-----------|-------------|
 | `/cmd_vel` | `geometry_msgs/msg/Twist` | `obstacle_avoider` | `pybullet_sim`, `telemetry_recorder` |
 | `/odom` | `nav_msgs/msg/Odometry` | `pybullet_sim` | `telemetry_recorder` |
-| `/tf` | `tf2_msgs/msg/TFMessage` | `pybullet_sim` | any (via TF API) |
+| `/tf` | `tf2_msgs/msg/TFMessage` | `pybullet_sim` (odom→base_link), `robot_state_publisher` (base_link→links) | any (via TF API) |
 | `/scan` | `sensor_msgs/msg/LaserScan` | `pybullet_sim` | `obstacle_avoider`, `telemetry_recorder` |
-| `/joint_states` | `sensor_msgs/msg/JointState` | `pybullet_sim` (drive wheels) | `telemetry_recorder` |
+| `/joint_states` | `sensor_msgs/msg/JointState` | `pybullet_sim` (drive wheels) | `robot_state_publisher`, `telemetry_recorder` |
 | `/arm_joint_states` | `sensor_msgs/msg/JointState` | `pick_place_controller` | `telemetry_recorder` |
-| `/robot_description` | `std_msgs/msg/String` + global param | `pybullet_sim` | Foxglove / rviz2 |
+| `/robot_description` | `std_msgs/msg/String` + global param | `robot_state_publisher` | Foxglove / rviz2 |
+
+**Frame tree:** `pybullet_sim` publishes only `odom → base_link` (motion). The
+URDF link transforms `base_link → {left_wheel, right_wheel, lidar_link,
+caster_link}` are computed by **robot_state_publisher** from `/joint_states`
+(so wheel rotation animates in Foxglove), and the `lidar_link` frame carries
+`/scan`.
 | `/arm_pose` | `geometry_msgs/msg/PoseStamped` | `pick_place_controller` | `telemetry_recorder` |
 | `/pick_place_status` | `std_msgs/msg/String` | `pick_place_controller` | `telemetry_recorder` |
 
@@ -128,8 +141,8 @@ machine-readable JSON.
 
 ```bash
 cd ~/ros2_ws
-colcon build                       # build all packages
-source install/setup.bash          # source the workspace (also: echo 'source ...' >> ~/.bashrc)
+colcon build --symlink-install      # build all packages
+source install/setup.bash           # source the workspace (also: echo 'source ...' >> ~/.bashrc)
 ```
 
 Build individual packages:
@@ -140,15 +153,18 @@ colcon build --packages-select arm_pick_place
 colcon build --packages-select robot_telemetry
 ```
 
-### 4.3 Run — Project 2: Obstacle Avoidance
+### 4.3 Run — Obstacle Avoidance (sim + avoider + robot_state_publisher)
 
 ```bash
-# Option A: single launch (sim + avoider)
+# single launch: pybullet_sim + obstacle_avoider + robot_state_publisher
 ros2 launch basic_robot_sim obstacle_avoidance.launch.py
 
-# Option B: separate terminals
-python3 src/basic_robot_sim/scripts/pybullet_sim.py   # or: ros2 run basic_robot_sim obstacle_avoider
+# or run the pieces individually in separate terminals:
+python3 src/basic_robot_sim/scripts/pybullet_sim.py
 ros2 run basic_robot_sim obstacle_avoider
+ros2 run robot_state_publisher robot_state_publisher --ros-args \
+    -p robot_description:="$(cat install/basic_robot_sim/share/basic_robot_sim/urdf/robot.urdf)"
+```
 
 # Inspect the closed loop
 ros2 topic echo /odom --once

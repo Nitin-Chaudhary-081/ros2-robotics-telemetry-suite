@@ -6,7 +6,7 @@ move to place location, release, and return home.
 
 Publishes:
     /arm_joint_states  sensor_msgs/msg/JointState   arm joint angles + gripper
-    /arm_pose          geometry_msgs/msg/PoseStamped  end-effector pose (frame "arm_tool")
+    /arm_pose          geometry_msgs/msg/PoseStamped  end-effector pose (frame "base_link")
     /pick_place_status std_msgs/msg/String          human-readable status text
 
 Joint names: waist_joint, shoulder_joint, elbow_joint,
@@ -200,7 +200,6 @@ class PickPlaceController(Node):
         now = self.get_clock().now().to_msg()
         js = JointState()
         js.header = Header(stamp=now)
-        js.header.frame_id = 'arm_base'
         js.name = list(self.JOINT_NAMES)
         js.position = [self.current_theta[0], self.current_theta[1],
                        self.current_theta[2],
@@ -212,7 +211,9 @@ class PickPlaceController(Node):
         xyz = self.arm.forward_kinematics(*self.current_theta)
         pose = PoseStamped()
         pose.header = Header(stamp=now)
-        pose.header.frame_id = 'arm_base'
+        # base_link = robot chassis frame; the arm is mounted on the robot, so
+        # this keeps /arm_pose renderable in the odom TF tree (Foxglove)
+        pose.header.frame_id = 'base_link'
         pose.pose.position.x = xyz[0]
         pose.pose.position.y = xyz[1]
         pose.pose.position.z = xyz[2]

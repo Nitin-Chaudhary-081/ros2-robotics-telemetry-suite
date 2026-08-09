@@ -5,26 +5,25 @@ Pure Python differential-drive robot simulation with ROS 2 interfaces.
 Provides:
     /cmd_vel      (subscriber) -- velocity commands
     /odom         (publisher)  -- odometry with covariance
-    /tf           (publisher)  -- odom -> base_link -> lidar_link/wheels/caster
+    /tf           (publisher)  -- odom -> base_link (robot motion only)
     /scan         (publisher)  -- 360-beam LiDAR, frame 'lidar_link'
-    /joint_states (publisher)  -- wheel joint angles for visualization
-    /robot_description -- URDF model (topic + global parameter)
+    /joint_states (publisher)  -- wheel joint angles (consumed by
+                                  robot_state_publisher for link TFs)
 
 Designed as a drop-in replacement for gz-sim (whose physics engines are
 unusable on this platform) and works with the obstacle_avoider node.
+Link transforms for wheels/lidar/caster come from robot_state_publisher
+(launched by obstacle_avoidance.launch.py); this node owns odom -> base_link.
 """
 
 import math
-import os
 
 from geometry_msgs.msg import TransformStamped, Twist
 from nav_msgs.msg import Odometry
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
-                       ReliabilityPolicy)
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import JointState, LaserScan
-from std_msgs.msg import String
 from tf2_ros import TransformBroadcaster
 
 
@@ -79,27 +78,7 @@ class RobotSim(Node):
         self.odom_pub = self.create_publisher(Odometry, '/odom', qos)
         self.scan_pub = self.create_publisher(LaserScan, '/scan', qos)
         self.joint_pub = self.create_publisher(JointState, '/joint_states', qos)
-
-        # robot_description: transient-local durability (latched) so late
-        # subscribers still get the URDF, plus a republish timer as a fallback
-        robot_desc_qos = QoSProfile(
-            reliability=ReliabilityPolicy.RELIABLE,
-            durability=DurabilityPolicy.TRANSIENT_LOCAL,
-            history=HistoryPolicy.KEEP_LAST,
-            depth=1)
-        self.robot_desc_pub = self.create_publisher(
-            String, '/robot_description', robot_desc_qos)
         self.tf_broadcaster = TransformBroadcaster(self)
-
-        # Publish the robot model both as a topic and as a global parameter
-        # so Foxglove / rviz2 can load it automatically from the connection
-        self._urdf_xml = load_urdf()
-        self.publish_robot_description()
-        self.declare_parameter('/robot_description', self._urdf_xml)
-        self.create_timer(2.0, self.publish_robot_description)
-        self.get_logger().info(
-            'robot_description published (%d chars) on topic + parameter'
-            % len(self._urdf_xml))
 
         # Timer for simulation step (100 Hz)
         self.dt = 0.01
@@ -113,10 +92,6 @@ class RobotSim(Node):
                             min(self.max_linear_vel, msg.linear.x))
         self.v_angular = max(-self.max_angular_vel,
                              min(self.max_angular_vel, msg.angular.z))
-
-    def publish_robot_description(self):
-        """(Re)publish the URDF; transient-local QoS latches it for joiners."""
-        self.robot_desc_pub.publish(String(data=self._urdf_xml))
 
     def step(self):
         now = self.get_clock().now()
@@ -175,6 +150,9 @@ class RobotSim(Node):
         self.odom_pub.publish(odom)
 
     def publish_tf(self, now):
+        # Simulated motion only: odom -> base_link. The URDF link transforms
+        # (left/right_wheel, lidar_link, caster_link) are published by
+        # robot_state_publisher from the URDF joints + /joint_states.
         t = TransformStamped()
         t.header.stamp = now.to_msg()
         t.header.frame_id = 'odom'
@@ -187,53 +165,7 @@ class RobotSim(Node):
         t.transform.rotation.y = q[1]
         t.transform.rotation.z = q[2]
         t.transform.rotation.w = q[3]
-
-        # Full URDF frame tree (base_link -> all links) so Foxglove renders
-        # every link of robot.urdf, not just the chassis
-        lidar_link = TransformStamped()
-        lidar_link.header.stamp = now.to_msg()
-        lidar_link.header.frame_id = 'base_link'
-        lidar_link.child_frame_id = 'lidar_link'
-        lidar_link.transform.translation.z = 0.07
-        lidar_link.transform.rotation.w = 1.0
-
-        caster = TransformStamped()
-        caster.header.stamp = now.to_msg()
-        caster.header.frame_id = 'base_link'
-        caster.child_frame_id = 'caster_link'
-        caster.transform.translation.x = -0.11
-        caster.transform.translation.z = -0.035
-        caster.transform.rotation.w = 1.0
-
-        # Wheels: rotate about the wheel axis (y) by the integrated angle
-        left_wheel = TransformStamped()
-        left_wheel.header.stamp = now.to_msg()
-        left_wheel.header.frame_id = 'base_link'
-        left_wheel.child_frame_id = 'left_wheel'
-        left_wheel.transform.translation.y = 0.14
-        qw = self.py_angle_to_quaternion(self.left_wheel_angle)
-        left_wheel.transform.rotation.x = qw[0]
-        left_wheel.transform.rotation.y = qw[1]
-        left_wheel.transform.rotation.z = qw[2]
-        left_wheel.transform.rotation.w = qw[3]
-
-        right_wheel = TransformStamped()
-        right_wheel.header.stamp = now.to_msg()
-        right_wheel.header.frame_id = 'base_link'
-        right_wheel.child_frame_id = 'right_wheel'
-        right_wheel.transform.translation.y = -0.14
-        qw = self.py_angle_to_quaternion(self.right_wheel_angle)
-        right_wheel.transform.rotation.x = qw[0]
-        right_wheel.transform.rotation.y = qw[1]
-        right_wheel.transform.rotation.z = qw[2]
-        right_wheel.transform.rotation.w = qw[3]
-
-        self.tf_broadcaster.sendTransform([t, lidar_link, caster,
-                                           left_wheel, right_wheel])
-
-    def py_angle_to_quaternion(self, angle):
-        """Quaternion for rotation about the y axis by angle radians."""
-        return [0.0, math.sin(angle / 2.0), 0.0, math.cos(angle / 2.0)]
+        self.tf_broadcaster.sendTransform(t)
 
     def publish_scan(self, now):
         scan = LaserScan()
@@ -295,29 +227,6 @@ class RobotSim(Node):
             cr * cp * cy + sr * sp * sy,
         ]
         return q
-
-
-def load_urdf():
-    """Return the robot.urdf XML as a string, from install or source tree."""
-    candidates = []
-
-    try:
-        from ament_index_python.packages import get_package_share_directory
-        candidates.append(os.path.join(
-            get_package_share_directory('basic_robot_sim'),
-            'urdf', 'robot.urdf'))
-    except Exception:
-        pass
-
-    candidates.append(os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        '..', 'urdf', 'robot.urdf'))
-
-    for path in candidates:
-        if os.path.isfile(path):
-            with open(path) as fh:
-                return fh.read()
-    return ''
 
 
 def main():
