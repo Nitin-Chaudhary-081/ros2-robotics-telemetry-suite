@@ -3,10 +3,11 @@
 Pure Python differential-drive robot simulation with ROS 2 interfaces.
 
 Provides:
-    /cmd_vel (subscriber) -- velocity commands
-    /odom   (publisher)   -- odometry with covariance
-    /tf     (publisher)   -- odom -> base_link transform
-    /scan   (publisher)   -- 360-beam LiDAR using ray-circle collision
+    /cmd_vel      (subscriber) -- velocity commands
+    /odom         (publisher)  -- odometry with covariance
+    /tf           (publisher)  -- odom -> base_link -> laser transforms
+    /scan         (publisher)  -- 360-beam LiDAR using ray-circle collision
+    /joint_states (publisher)  -- wheel joint angles for visualization
 
 Designed as a drop-in replacement for gz-sim (whose physics engines are
 unusable on this platform) and works with the obstacle_avoider node.
@@ -19,7 +20,7 @@ from nav_msgs.msg import Odometry
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
-from sensor_msgs.msg import LaserScan
+from sensor_msgs.msg import JointState, LaserScan
 from tf2_ros import TransformBroadcaster
 
 
@@ -35,6 +36,10 @@ class RobotSim(Node):
         self.theta = 0.0
         self.v_linear = 0.0
         self.v_angular = 0.0
+
+        # Wheel joint angles (for /joint_states visualization)
+        self.left_wheel_angle = 0.0
+        self.right_wheel_angle = 0.0
 
         # Robot params
         self.wheel_base = 0.35
@@ -69,6 +74,7 @@ class RobotSim(Node):
 
         self.odom_pub = self.create_publisher(Odometry, '/odom', qos)
         self.scan_pub = self.create_publisher(LaserScan, '/scan', qos)
+        self.joint_pub = self.create_publisher(JointState, '/joint_states', qos)
         self.tf_broadcaster = TransformBroadcaster(self)
 
         # Timer for simulation step (100 Hz)
@@ -100,10 +106,17 @@ class RobotSim(Node):
         # Normalize theta
         self.theta = math.atan2(math.sin(self.theta), math.cos(self.theta))
 
+        # Integrate wheel angles for /joint_states visualization
+        v_left = self.v_linear - self.v_angular * self.wheel_base / 2.0
+        v_right = self.v_linear + self.v_angular * self.wheel_base / 2.0
+        self.left_wheel_angle += v_left / self.wheel_radius * dt
+        self.right_wheel_angle += v_right / self.wheel_radius * dt
+
         # Publish odom
         self.publish_odom(now, dt)
         self.publish_tf(now)
         self.publish_scan(now)
+        self.publish_joint_states(now)
 
     def publish_odom(self, now, dt):
         odom = Odometry()
@@ -146,7 +159,61 @@ class RobotSim(Node):
         t.transform.rotation.y = q[1]
         t.transform.rotation.z = q[2]
         t.transform.rotation.w = q[3]
-        self.tf_broadcaster.sendTransform(t)
+
+        # Lidar transform: base_link -> laser (matches URDF lidar_joint origin)
+        lidar = TransformStamped()
+        lidar.header.stamp = now.to_msg()
+        lidar.header.frame_id = 'base_link'
+        lidar.child_frame_id = 'laser'
+        lidar.transform.translation.z = 0.07
+        lidar.transform.rotation.w = 1.0
+
+        # Full URDF frame tree (base_link -> all links) so Foxglove renders
+        # every link of robot.urdf, not just the chassis
+        lidar_link = TransformStamped()
+        lidar_link.header.stamp = now.to_msg()
+        lidar_link.header.frame_id = 'base_link'
+        lidar_link.child_frame_id = 'lidar_link'
+        lidar_link.transform.translation.z = 0.07
+        lidar_link.transform.rotation.w = 1.0
+
+        caster = TransformStamped()
+        caster.header.stamp = now.to_msg()
+        caster.header.frame_id = 'base_link'
+        caster.child_frame_id = 'caster_link'
+        caster.transform.translation.x = -0.11
+        caster.transform.translation.z = -0.035
+        caster.transform.rotation.w = 1.0
+
+        # Wheels: rotate about the wheel axis (y) by the integrated angle
+        left_wheel = TransformStamped()
+        left_wheel.header.stamp = now.to_msg()
+        left_wheel.header.frame_id = 'base_link'
+        left_wheel.child_frame_id = 'left_wheel'
+        left_wheel.transform.translation.y = 0.14
+        qw = self.py_angle_to_quaternion(self.left_wheel_angle)
+        left_wheel.transform.rotation.x = qw[0]
+        left_wheel.transform.rotation.y = qw[1]
+        left_wheel.transform.rotation.z = qw[2]
+        left_wheel.transform.rotation.w = qw[3]
+
+        right_wheel = TransformStamped()
+        right_wheel.header.stamp = now.to_msg()
+        right_wheel.header.frame_id = 'base_link'
+        right_wheel.child_frame_id = 'right_wheel'
+        right_wheel.transform.translation.y = -0.14
+        qw = self.py_angle_to_quaternion(self.right_wheel_angle)
+        right_wheel.transform.rotation.x = qw[0]
+        right_wheel.transform.rotation.y = qw[1]
+        right_wheel.transform.rotation.z = qw[2]
+        right_wheel.transform.rotation.w = qw[3]
+
+        self.tf_broadcaster.sendTransform([t, lidar, lidar_link, caster,
+                                           left_wheel, right_wheel])
+
+    def py_angle_to_quaternion(self, angle):
+        """Quaternion for rotation about the y axis by angle radians."""
+        return [0.0, math.sin(angle / 2.0), 0.0, math.cos(angle / 2.0)]
 
     def publish_scan(self, now):
         scan = LaserScan()
@@ -186,6 +253,13 @@ class RobotSim(Node):
 
         scan.ranges = ranges
         self.scan_pub.publish(scan)
+
+    def publish_joint_states(self, now):
+        js = JointState()
+        js.header.stamp = now.to_msg()
+        js.name = ['left_wheel_joint', 'right_wheel_joint']
+        js.position = [self.left_wheel_angle, self.right_wheel_angle]
+        self.joint_pub.publish(js)
 
     def euler_to_quaternion(self, roll, pitch, yaw):
         cy = math.cos(yaw * 0.5)
