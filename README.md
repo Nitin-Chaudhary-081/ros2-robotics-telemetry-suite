@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/hero.svg" width="100%" alt="ROS 2 Jazzy Robotics Simulation Workspace">
+</p>
+
 # ROS 2 Jazzy Robotics Simulation Workspace
 
 A production-grade ROS 2 (Jazzy) robotics simulation stack consisting of four

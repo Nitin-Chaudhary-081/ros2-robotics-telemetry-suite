@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400" role="img" aria-label="ROS 2 Jazzy Robotics Simulation Workspace">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f172a"/>
+      <stop offset="0.5" stop-color="#1a1a2e"/>
+      <stop offset="1" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="cyber" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fbbf24"/>
+      <stop offset="1" stop-color="#f472b6"/>
+    </linearGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <path id="armorbit" d="M0 0 m-45 0 a45 45 0 1 0 90 0 a45 45 0 1 0 -90 0" fill="none" stroke="none"/>
+  </defs>
+
+  <rect width="1200" height="400" rx="20" fill="url(#bg)"/>
+  <path d="M0 385 Q 300 340 600 385 T 1200 385" fill="none" stroke="#334155" stroke-width="1" opacity="0.5"/>
+
+  <!-- left: text -->
+  <g font-family="sans-serif">
+    <text x="60" y="120" fill="#e2e8f0" font-size="34" font-weight="700">ROS 2 <tspan fill="url(#cyber)">Robotics</tspan></text>
+    <text x="60" y="158" fill="#94a3b8" font-size="16">Simulation workspace &#183; Jazzy</text>
+    <text x="60" y="186" fill="#cbd5e1" font-size="13">obstacle avoidance &#183; 3-DOF arm pick-and-place &#183; telemetry</text>
+    <text x="60" y="210" fill="#64748b" font-size="12">headless AWS Ubuntu 24.04 VPS &#183; pybullet + URDF</text>
+    <line x1="60" y1="228" x2="330" y2="228" stroke="url(#cyber)" stroke-width="2" opacity="0.6"/>
+  </g>
+
+  <!-- center: mobile robot with LiDAR -->
+  <g transform="translate(470 235)">
+    <!-- floor -->
+    <rect x="-150" y="40" width="300" height="2" fill="#334155" opacity="0.6"/>
+    <!-- obstacles -->
+    <rect x="-120" y="-10" width="26" height="26" rx="4" fill="#1e293b" stroke="#f87171" stroke-width="2">
+      <animate attributeName="opacity" values="1;0.6;1" dur="2s" repeatCount="indefinite"/>
+    </rect>
+    <rect x="85" y="-20" width="22" height="22" rx="4" fill="#1e293b" stroke="#f87171" stroke-width="2">
+      <animate attributeName="opacity" values="1;0.6;1" dur="2.4s" repeatCount="indefinite" begin="0.6s"/>
+    </rect>
+    <!-- robot base -->
+    <rect x="-32" y="6" width="64" height="30" rx="8" fill="#1e293b" stroke="#fbbf24" stroke-width="2"/>
+    <!-- lidar dome (rotating sweep) -->
+    <circle cx="0" cy="6" r="16" fill="#111827" stroke="#38bdf8" stroke-width="1.5"/>
+    <line x1="0" y1="6" x2="16" y2="6" stroke="#38bdf8" stroke-width="2.5" filter="url(#glow)">
+      <animateTransform attributeName="transform" type="rotate" from="0 0 6" to="360 0 6" dur="2.4s" repeatCount="indefinite"/>
+    </line>
+    <line x1="0" y1="6" x2="0" y2="-10" stroke="#38bdf8" stroke-width="1" opacity="0.3">
+      <animateTransform attributeName="transform" type="rotate" from="0 0 6" to="360 0 6" dur="2.4s" repeatCount="indefinite"/>
+    </line>
+    <!-- radar rings -->
+    <circle r="24" fill="none" stroke="#38bdf8" stroke-width="1" opacity="0">
+      <animate attributeName="r" values="24;70" dur="2s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.6;0" dur="2s" repeatCount="indefinite"/>
+    </circle>
+    <!-- wheels -->
+    <rect x="-28" y="36" width="14" height="8" rx="3" fill="#334155"/>
+    <rect x="14" y="36" width="14" height="8" rx="3" fill="#334155"/>
+  </g>
+
+  <!-- right-center: 3-DOF arm pick-and-place -->
+  <g transform="translate(760 150)">
+    <!-- base -->
+    <rect x="-26" y="110" width="52" height="12" rx="4" fill="#1e293b" stroke="#fbbf24" stroke-width="1.5"/>
+    <!-- shoulder -->
+    <rect x="-10" y="72" width="20" height="38" rx="4" fill="#334155" stroke="#fbbf24" stroke-width="1.5">
+      <animateTransform attributeName="transform" type="rotate" values="0 0 110;-14 0 110;14 0 110;0 0 110" dur="5s" repeatCount="indefinite"/>
+    </rect>
+    <!-- upper arm segment -->
+    <g>
+      <animateTransform attributeName="transform" type="rotate" values="0 0 110;-30 0 110;30 0 110;0 0 110" dur="5s" repeatCount="indefinite"/>
+      <rect x="-7" y="18" width="14" height="54" rx="6" fill="#475569" stroke="#fbbf24" stroke-width="1.5"/>
+      <!-- elbow -->
+      <circle cx="0" cy="18" r="7" fill="#fbbf24"/>
+      <!-- forearm + gripper -->
+      <g transform="translate(0 18)">
+        <animateTransform attributeName="transform" type="rotate" values="40 0 0;-40 0 0;40 0 0" dur="5s" repeatCount="indefinite"/>
+        <rect x="-6" y="-30" width="12" height="34" rx="5" fill="#64748b" stroke="#fbbf24" stroke-width="1.5"/>
+        <rect x="-8" y="-30" width="16" height="6" rx="2" fill="#1e293b" stroke="#f472b6" stroke-width="1.5"/>
+        <!-- gripper jaws -->
+        <line x1="-7" y1="-30" x2="-12" y2="-42" stroke="#f472b6" stroke-width="4" stroke-linecap="round">
+          <animateTransform attributeName="transform" type="rotate" values="0 -7 -30;14 -7 -30;14 -7 -30;0 -7 -30" dur="5s" repeatCount="indefinite"/>
+        </line>
+        <line x1="7" y1="-30" x2="12" y2="-42" stroke="#f472b6" stroke-width="4" stroke-linecap="round">
+          <animateTransform attributeName="transform" type="rotate" values="0 7 -30;-14 7 -30;-14 7 -30;0 7 -30" dur="5s" repeatCount="indefinite"/>
+        </line>
+      </g>
+    </g>
+    <!-- payload cube being carried -->
+    <rect x="-8" y="-52" width="16" height="14" rx="2" fill="#f472b6" opacity="0.9" filter="url(#glow)">
+      <animateTransform attributeName="transform" type="translate" values="0 0;0 -14;0 -14;0 0" dur="5s" repeatCount="indefinite"/>
+    </rect>
+    <!-- ground pad target -->
+    <rect x="46" y="118" width="18" height="5" rx="2" fill="#34d399"/>
+    <rect x="44" y="104" width="20" height="14" rx="2" fill="none" stroke="#34d399" stroke-width="1.5" stroke-dasharray="3 3"/>
+  </g>
+
+  <!-- right: telemetry streaming -->
+  <g transform="translate(1000 60)">
+    <rect x="0" y="0" width="150" height="280" rx="12" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
+    <text x="12" y="24" font-family="monospace" font-size="11" fill="#fbbf24">telemetry</text>
+    <line x1="12" y1="34" x2="138" y2="34" stroke="#334155" stroke-width="1"/>
+    <g font-family="monospace" font-size="9">
+      <text x="12" y="54" fill="#94a3b8">/odom</text>
+      <text x="12" y="70" fill="#94a3b8">/scan</text>
+      <text x="12" y="86" fill="#94a3b8">/tf</text>
+      <text x="12" y="102" fill="#94a3b8">/arm_joint_states</text>
+    </g>
+    <!-- streaming sparkline -->
+    <polyline fill="none" stroke="#fbbf24" stroke-width="2" points="12,180 30,160 48,170 66,140 84,150 102,120 120,130 138,105">
+      <animate attributeName="opacity" values="0.3;1;0.3" dur="2s" repeatCount="indefinite"/>
+    </polyline>
+    <!-- CSV rows appearing -->
+    <g font-family="monospace" font-size="8" fill="#64748b">
+      <text x="12" y="220">0.0,0.0,0.0</text>
+      <text x="12" y="234" opacity="0">0.1,0.0,0.0</text>
+      <text x="12" y="248" opacity="0">0.2,0.0,0.0</text>
+      <animate attributeName="opacity" values="0;1" dur="3s" fill="freeze"/>
+    </g>
+    <text x="12" y="268" font-family="sans-serif" font-size="9" fill="#fbbf24">CSV + JSONL + MCAP</text>
+  </g>
+</svg>
